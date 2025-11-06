@@ -1,12 +1,15 @@
-# app.py (Windows 최소 동작 예시)
+# app.py (Render 무료 플랜용)
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-import sqlite3, os, datetime
+import sqlite3, datetime
+from pathlib import Path
 
-DB_PATH = os.environ.get("DB_PATH", "events.db")
-AUTO_APPROVE = os.environ.get("AUTO_APPROVE", "true").lower() == "true"
+# ★ 앱 폴더 내부에 DB 파일을 저장 (디스크 없이 동작)
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = str((BASE_DIR / "events.db").resolve())
+AUTO_APPROVE = "true"  # Render 환경변수로 바꿔도 되지만 기본값은 true
 
 app = FastAPI(title="Public Calendar")
 
@@ -17,12 +20,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 정적 파일 제공(/static) 및 루트 페이지
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# ★ 절대경로로 static 마운트 (어디서 실행해도 안전)
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 def root():
-    return FileResponse("static/index.html")
+    return FileResponse(str(BASE_DIR / "static" / "index.html"))
 
 # --- DB 초기화 ---
 def init_db():
@@ -103,7 +106,7 @@ def create_event(
     else:
         start_time, end_time = "09:00", "13:00"
 
-    status = "approved" if AUTO_APPROVE else "pending"
+    status = "approved" if AUTO_APPROVE == "true" else "pending"
     created_at = datetime.datetime.utcnow().isoformat()
 
     conn = sqlite3.connect(DB_PATH)
