@@ -1,39 +1,43 @@
-<!-- static/index.html -->
 <!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <title>공개 배차 캘린더</title>
+  <title>구매팀 캘린더</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- FullCalendar CDN -->
   <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background:#f5f7fb; }
-    .wrap { max-width: 1100px; margin: 24px auto; padding: 0 16px; display: grid; grid-template-columns: 380px 1fr; gap: 16px; }
-    .card { background:#fff; border-radius:16px; padding:16px; box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
-    .title { font-size: 20px; font-weight: 700; margin: 4px 0 12px; }
-    label { display:block; font-size:14px; margin:10px 0 4px; }
-    input, select, textarea { width:100%; padding:10px; border:1px solid #e6e8ee; border-radius:10px; font-size:14px; }
-    button { width:100%; padding:12px; border:0; border-radius:12px; font-weight:700; cursor:pointer; background:#2f6fed; color:#fff; margin-top:12px; }
-    .row { display:flex; gap:8px; }
-    .hint { color:#667085; font-size:12px; margin-top:8px; }
-    .ok { color:#127c38; font-weight:600; }
-    .err { color:#b42318; font-weight:600; }
-    #calendar { max-width: 100%; }
-    .fc .fc-toolbar-title { font-size: 18px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background:#f6f8fb; }
+    .wrap { max-width: 980px; margin: 24px auto; padding: 0 16px; display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
+    .card { background:#fff; border-radius:14px; padding:14px; box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
+    h3 { margin: 6px 0 10px; font-size:18px }
+    label { display:block; font-size:13px; margin:10px 0 6px; color:#333 }
+    select, input, button { width:100%; padding:10px; border-radius:10px; border:1px solid #e3e6ef; font-size:14px; }
+    button { background:#2f6fed; color:#fff; font-weight:700; border:none; cursor:pointer; margin-top:12px; }
+    .hint { font-size:12px; color:#667085; margin-top:8px }
+    .ok { color:#127c38; font-weight:600 }
+    .err { color:#b42318; font-weight:600 }
+    #calendar { max-width:100% }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
-      <div class="title">배차 신청</div>
+      <h3>배차 신청</h3>
       <form id="reqForm">
-        <label>제목(이름 + 용무 요약)</label>
-        <input name="title" placeholder="예: 홍길동 - OO업체 미팅" required />
+        <label>사용자</label>
+        <select name="name" required>
+          <!-- ✅ 여기 사용자 목록을 원하는 이름들로 수정하세요 -->
+          <option value="" disabled selected>선택하세요</option>
+          <option>김동호</option>
+          <option>전성일</option>
+          <option>박영민</option>
+          <option>정학진</option>
+          <option>김성현</option>
+        </select>
 
         <label>사용일자</label>
-        <input type="date" name="date" required />
+        <input type="date" name="date" required>
 
         <label>사용시간</label>
         <select name="timeslot">
@@ -42,69 +46,62 @@
           <option selected>하루종일</option>
         </select>
 
-        <div class="row">
-          <div style="flex:1">
-            <label>장소(선택)</label>
-            <input name="location" placeholder="예: OO업체" />
-          </div>
-          <div style="flex:1">
-            <label>&nbsp;</label>
-            <div class="hint">타임존: Asia/Seoul</div>
-          </div>
-        </div>
-
-        <label>상세 내용(선택)</label>
-        <textarea name="description" rows="4" placeholder="목적/경로 등"></textarea>
-
-        <button type="submit">신청 올리기</button>
+        <button type="submit">등록</button>
         <div id="msg" class="hint"></div>
       </form>
+
+      <div class="hint" style="margin-top:10px">
+        * 삭제: 달력의 이벤트를 클릭하면 삭제 여부를 묻습니다.
+      </div>
     </div>
 
     <div class="card">
-      <div class="title">공개 캘린더</div>
+      <h3>캘린더</h3>
       <div id="calendar"></div>
     </div>
   </div>
 
   <script>
-    // 캘린더 초기화
     document.addEventListener('DOMContentLoaded', () => {
       const calEl = document.getElementById('calendar');
       const calendar = new FullCalendar.Calendar(calEl, {
         initialView: 'dayGridMonth',
         locale: 'ko',
         height: 'auto',
+        events: '/events',
         eventTimeFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
-        events: '/events', // 공개 API
-        eventDidMount: (info) => {
-          const props = info.event.extendedProps || {};
-          const tip = [];
-          if (props.location) tip.push('장소: ' + props.location);
-          if (props.description) tip.push('내용: ' + props.description);
-          if (tip.length) info.el.title = tip.join('\n');
+        eventClick: async (info) => {
+          const id = info.event.id;
+          const title = info.event.title;
+          if (confirm(`이 이벤트를 삭제할까요?\n\n${title}`)) {
+            try {
+              const res = await fetch(`/events/${id}`, { method: 'DELETE' });
+              const data = await res.json();
+              if (!res.ok || !data.ok) throw new Error(data.detail || '삭제 실패');
+              calendar.refetchEvents();
+            } catch (err) {
+              alert('에러: ' + err.message);
+            }
+          }
         }
       });
       calendar.render();
 
-      // 폼 제출
       const form = document.getElementById('reqForm');
       const msg = document.getElementById('msg');
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         msg.textContent = '전송 중...';
         const fd = new FormData(form);
-
         try {
           const res = await fetch('/events', { method: 'POST', body: fd });
           const data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.detail || '등록 실패');
-          msg.innerHTML = `<span class="ok">등록 완료!</span> 새로고침 없이 캘린더가 반영됩니다.`;
+          msg.innerHTML = '<span class="ok">등록 완료!</span>';
           form.reset();
-          // 캘린더 즉시 갱신
           calendar.refetchEvents();
         } catch (err) {
-          msg.innerHTML = `<span class="err">에러: ${err.message}</span>`;
+          msg.innerHTML = '<span class="err">에러: ' + err.message + '</span>';
         }
       });
     });
