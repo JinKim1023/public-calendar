@@ -1,16 +1,27 @@
-# app.py — 간단 폼 + 삭제 기능 포함 (Render 무료 플랜 OK)
+# app.py — Supabase(Postgres) 버전 (간단 폼 + 삭제 기능)
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-import sqlite3, datetime
 from pathlib import Path
+import datetime
+import os
+import psycopg2  # ✅ Postgres(Supabase) 연결용
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = str((BASE_DIR / "events.db").resolve())
-AUTO_APPROVE = "true"  # 필요시 환경변수로 바꿔도 됨
 
-app = FastAPI(title="구매팀 캘린더")
+# Render 환경변수에서 AUTO_APPROVE, DATABASE_URL 읽기
+AUTO_APPROVE = os.getenv("AUTO_APPROVE", "true").lower() == "true"
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError("환경변수 DATABASE_URL 이 설정되어 있지 않습니다.")
+
+def get_conn():
+    # Supabase는 SSL 필요 → sslmode='require'
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
+
+app = FastAPI(title="구매팀 캘린더 (Supabase DB)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,44 +30,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 정적 파일 & 루트
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 def root():
     return FileResponse(str(BASE_DIR / "static" / "index.html"))
 
-# --- DB 초기화 ---
+# --- DB 초기화 (테이블 없으면 생성) ---
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,   -- 예: 김성현 (오전)
-        date TEXT NOT NULL,    -- YYYY-MM-DD
-        start_time TEXT,       -- HH:MM (없으면 종일)
-        end_time TEXT,
-        status TEXT NOT NULL DEFAULT 'approved',
-        created_at TEXT NOT NULL
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS events (
+            id SERIAL PRIMARY KEY,
+            title TEXT NOT NULL,   -- 예: 김성현 (오전)
+            date TEXT NOT NULL,    -- YYYY-MM-DD
+            start_time TEXT,       -- HH:MM (없으면 종일)
+            end_time TEXT,
+            status TEXT NOT NULL DEFAULT 'approved',
+            created_at TEXT NOT NULL
+        )
+        """
     )
-    """)
     conn.commit()
+    cur.close()
     conn.close()
 
 init_db()
 
-# --- API ---
+# --- API: 조회 ---
 @app.get("/events")
 def list_events(status: str = "approved"):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-      SELECT id, title, date, start_time, end_time, status
-      FROM events
-      WHERE status=?
-      ORDER BY date, COALESCE(start_time,'00:00')
-    """, (status,))
-    rows = c.fetchall()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, title, date, start_time, end_time, status
+        FROM events
+        WHERE status = %s
+        ORDER BY date, COALESCE(start_time, '00:00')
+        """,
+        (status,),
+    )
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
 
     items = []
@@ -77,9 +96,10 @@ def list_events(status: str = "approved"):
             })
     return JSONResponse(items)
 
+# --- API: 생성 ---
 @app.post("/events")
 def create_event(
-    name: str = Form(...),               # ✅ 사용자명
+    name: str = Form(...),               # 사용자명
     date: str = Form(...),               # YYYY-MM-DD
     timeslot: str = Form("하루종일"),     # 오전/오후/하루종일
 ):
@@ -105,29 +125,37 @@ def create_event(
         start_time, end_time = "09:00", "13:00"
 
     title = f"{name} ({label})"
-    status = "approved" if AUTO_APPROVE == "true" else "pending"
+    status = "approved" if AUTO_APPROVE else "pending"
     created_at = datetime.datetime.utcnow().isoformat()
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-      INSERT INTO events (title, date, start_time, end_time, status, created_at)
-      VALUES (?,?,?,?,?,?)
-    """, (title, date, start_time, end_time, status, created_at))
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO events (title, date, start_time, end_time, status, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (title, date, start_time, end_time, status, created_at),
+    )
+    new_id = cur.fetchone()[0]
     conn.commit()
-    new_id = c.lastrowid
+    cur.close()
     conn.close()
 
     return {"ok": True, "id": new_id, "status": status}
 
+# --- API: 삭제 ---
 @app.delete("/events/{event_id}")
 def delete_event(event_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM events WHERE id=?", (event_id,))
-    deleted = c.rowcount
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM events WHERE id = %s", (event_id,))
+    deleted = cur.rowcount
     conn.commit()
+    cur.close()
     conn.close()
+
     if deleted == 0:
         raise HTTPException(status_code=404, detail="해당 이벤트가 없습니다.")
     return {"ok": True, "id": event_id}
